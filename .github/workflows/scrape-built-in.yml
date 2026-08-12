@@ -11,38 +11,66 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - {start: 1, end: 32, id: 01}
+          - {start: 33, end: 64, id: 02}
+          - {start: 65, end: 96, id: 03}
+          - {start: 97, end: 128, id: 04}
+          - {start: 129, end: 160, id: 05}
+          - {start: 161, end: 192, id: 06}
+          - {start: 193, end: 224, id: 07}
+          - {start: 225, end: 252, id: 08}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium beautifulsoup4
-
-      - name: Scrape directory with Selenium
+      - name: Install
+        run: pip install selenium beautifulsoup4
+      - name: Selenium scrape shard
+        env:
+          START_PAGE: ${{ matrix.shard.start }}
+          END_PAGE: ${{ matrix.shard.end }}
+          OUT_FILE: part_${{ matrix.shard.id }}.csv
         run: python scrape_builtin.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-${{ matrix.shard.id }}
+          path: part_${{ matrix.shard.id }}.csv
+          retention-days: 7
 
-      - name: Show row count
+  merge:
+    needs: scrape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          path: parts
+          merge-multiple: true
+      - name: Merge and validate
         run: |
           python - <<'PY'
-          import csv
-          p='builtin_colorado_companies.csv'
-          with open(p, newline='', encoding='utf-8') as f:
-              n=sum(1 for _ in csv.DictReader(f))
-          print('ROWS', n)
+          import csv, glob
+          rows={}
+          fields=None
+          for p in sorted(glob.glob('parts/*.csv')):
+              with open(p,newline='',encoding='utf-8') as f:
+                  r=csv.DictReader(f); fields=fields or r.fieldnames
+                  for x in r: rows[x['profile_url']]=x
+          data=sorted(rows.values(),key=lambda x:(int(x['source_page']),int(x['page_rank']),x['company'].lower()))
+          with open('builtin_colorado_companies.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(data)
+          print('UNIQUE_ROWS',len(data))
+          pages=sorted({int(x['source_page']) for x in data})
+          print('PAGES_PRESENT',len(pages),pages[:5],pages[-5:] if pages else [])
           PY
-
-      - name: Upload dataset
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: builtin-colorado-companies
-          path: |
-            builtin_colorado_companies.csv
-            builtin_colorado_companies_checkpoint.csv
-          if-no-files-found: error
+          path: builtin_colorado_companies.csv
           retention-days: 7
