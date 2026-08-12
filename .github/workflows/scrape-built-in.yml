@@ -1,0 +1,48 @@
+name: Scrape Built In Colorado
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scrape_builtin.py"
+      - ".github/workflows/scrape-built-in.yml"
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium beautifulsoup4
+
+      - name: Scrape directory with Selenium
+        run: python scrape_builtin.py
+
+      - name: Show row count
+        run: |
+          python - <<'PY'
+          import csv
+          p='builtin_colorado_companies.csv'
+          with open(p, newline='', encoding='utf-8') as f:
+              n=sum(1 for _ in csv.DictReader(f))
+          print('ROWS', n)
+          PY
+
+      - name: Upload dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: builtin-colorado-companies
+          path: |
+            builtin_colorado_companies.csv
+            builtin_colorado_companies_checkpoint.csv
+          if-no-files-found: error
+          retention-days: 7
